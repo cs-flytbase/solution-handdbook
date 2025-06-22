@@ -140,26 +140,106 @@ export default function HtmlPreview() {
     }
   };
   
+  // Preserve the editable state during direct editing mode
+  const [isEditing, setIsEditing] = useState(false);
+  const [lastScrollPosition, setLastScrollPosition] = useState(0);
+  
   // Toggle between code and direct editing modes
   const toggleEditMode = () => {
     const newMode = editMode === 'code' ? 'direct' : 'code';
     setEditMode(newMode);
     
     if (newMode === 'direct' && iframeRef.current?.contentDocument) {
+      // Store the scroll position
+      if (iframeRef.current.contentWindow) {
+        setLastScrollPosition(iframeRef.current.contentWindow.scrollY);
+      }
+      
       const doc = iframeRef.current.contentDocument;
+      setIsEditing(true);
+      
+      // Make the body content editable without triggering a rerender
       setTimeout(() => {
-        doc.body.contentEditable = 'true';
-        doc.designMode = 'on';
+        if (!doc || !doc.body) return;
         
+        // Find the element that contains the actual content
+        const contentElement = doc.querySelector('.document-content') || doc.body;
+        
+        // Make only the content area editable, not the whole document
+        (contentElement as HTMLElement).contentEditable = 'true';
+        
+        // Define a function to update the HTML when content changes
         const syncContent = () => {
-          setHtmlCode(doc.body.innerHTML);
+          if (!contentElement || !doc.body) return;
+          
+          // Store current scroll position before updating state
+          const scrollY = doc.defaultView?.scrollY || 0;
+          setLastScrollPosition(scrollY);
+          
+          // Get inner content from the editable area
+          const editedContent = contentElement.innerHTML;
+          
+          // We'll modify the htmlCode state by only replacing the content portion
+          // Extract only the body content section from the HTML code
+          const bodyMatch = htmlCode.includes('<body') 
+            ? htmlCode.match(/<body[^>]*>([\s\S]*?)<\/body>/i) 
+            : null;
+          
+          // Check if we're in .document-content or directly in body
+          const isInDocContent = doc.querySelector('.document-content') === contentElement;
+          
+          if (bodyMatch && bodyMatch[1]) {
+            if (isInDocContent) {
+              // If editing .document-content, we need to handle the special a4-page wrapper
+              const docContentRegex = /<div class="document-content">(([\s\S]*?))<\/div>/i;
+              const contentMatch = bodyMatch[1].match(docContentRegex);
+              
+              if (contentMatch && contentMatch[1]) {
+                // Replace just the document-content part
+                const newBodyContent = bodyMatch[1].replace(
+                  contentMatch[1],
+                  editedContent
+                );
+                setHtmlCode(htmlCode.replace(bodyMatch[1], newBodyContent));
+              } else {
+                // Replace just the inner content between body tags
+                const updatedHtml = htmlCode.replace(
+                  bodyMatch[1],
+                  editedContent
+                );
+                setHtmlCode(updatedHtml);
+              }
+            } else {
+              // Replace just the inner content between body tags
+              const updatedHtml = htmlCode.replace(
+                bodyMatch[1],
+                editedContent
+              );
+              setHtmlCode(updatedHtml);
+            }
+          } else {
+            // If no body tags found, just use the edited content
+            setHtmlCode(editedContent);
+          }
         };
         
-        doc.body.addEventListener('input', syncContent);
+        // Clean up old listener first
+        contentElement.removeEventListener('input', syncContent);
+        // Add listener for edits
+        contentElement.addEventListener('input', syncContent);
       }, 100);
     } else if (iframeRef.current?.contentDocument) {
+      // Switching back to code mode
       const doc = iframeRef.current.contentDocument;
-      doc.body.contentEditable = 'false';
+      setIsEditing(false);
+      
+      // Find the element that contains the actual content
+      const contentElement = doc.querySelector('.document-content') || doc.body;
+      
+      // Disable editing
+      if (contentElement) {
+        (contentElement as HTMLElement).contentEditable = 'false';
+      }
       doc.designMode = 'off';
     }
   };
@@ -391,7 +471,13 @@ export default function HtmlPreview() {
 
   // Update the iframe whenever the HTML code changes
   useEffect(() => {
+    // Skip refresh if we're in direct edit mode to avoid losing focus and position
+    if (isEditing) return;
+    
     if (iframeRef.current) {
+      // Store current scroll position before updating
+      const currentScrollY = iframeRef.current.contentWindow?.scrollY || 0;
+      
       const iframeDocument = iframeRef.current.contentDocument;
       if (iframeDocument) {
         const a4PageStyle = `
@@ -525,9 +611,19 @@ export default function HtmlPreview() {
         iframeDocument.open();
         iframeDocument.write(wrappedHtmlCode);
         iframeDocument.close();
+        
+        // Restore scroll position after content is loaded
+        // Use a short timeout to ensure the content has rendered
+        setTimeout(() => {
+          if (iframeRef.current?.contentWindow && lastScrollPosition > 0) {
+            iframeRef.current.contentWindow.scrollTo(0, lastScrollPosition);
+            // Reset stored position only after it's been restored
+            setLastScrollPosition(0);
+          }
+        }, 10);
       }
     }
-  }, [htmlCode]);
+  }, [htmlCode, isEditing, lastScrollPosition]);
 
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setHtmlCode(e.target.value);
