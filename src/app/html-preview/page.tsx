@@ -52,6 +52,9 @@ export default function HtmlPreview() {
   const [editMode, setEditMode] = useState('code'); // 'code' or 'direct'
   const [imageUploadProgress, setImageUploadProgress] = useState<number | null>(null);
   const [isExporting, setIsExporting] = useState(false);
+  const [selectedImage, setSelectedImage] = useState<HTMLImageElement | null>(null);
+  const [showImageControls, setShowImageControls] = useState(false);
+  const [imageControlsPosition, setImageControlsPosition] = useState({ top: 0, left: 0 });
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
   // Toast notification function
@@ -167,6 +170,9 @@ export default function HtmlPreview() {
         
         // Make only the content area editable, not the whole document
         (contentElement as HTMLElement).contentEditable = 'true';
+        
+        // Setup image selection and controls when in direct edit mode
+        setupImageControls(doc);
         
         // Define a function to update the HTML when content changes
         const syncContent = () => {
@@ -472,7 +478,13 @@ export default function HtmlPreview() {
   // Update the iframe whenever the HTML code changes
   useEffect(() => {
     // Skip refresh if we're in direct edit mode to avoid losing focus and position
-    if (isEditing) return;
+    if (isEditing) {
+      // Still setup image controls when content changes during editing
+      if (iframeRef.current?.contentDocument) {
+        setupImageControls(iframeRef.current.contentDocument);
+      }
+      return;
+    }
     
     if (iframeRef.current) {
       // Store current scroll position before updating
@@ -645,8 +657,154 @@ export default function HtmlPreview() {
     }
   };
 
+  // Function to set up image selection and controls
+  const setupImageControls = (doc: Document) => {
+    // Function to handle image click for selection
+    const handleImageClick = (e: Event) => {
+      const img = e.target as HTMLImageElement;
+      if (img.tagName === 'IMG') {
+        e.preventDefault();
+        e.stopPropagation();
+        
+        // Set the selected image
+        setSelectedImage(img);
+        
+        // Position controls near the image
+        const rect = img.getBoundingClientRect();
+        const iframe = iframeRef.current;
+        
+        if (iframe) {
+          const iframeRect = iframe.getBoundingClientRect();
+          setImageControlsPosition({
+            top: iframeRect.top + rect.top - 40, // Position above the image
+            left: iframeRect.left + rect.left
+          });
+          
+          setShowImageControls(true);
+        }
+      } else {
+        // Click outside an image hides the controls
+        setShowImageControls(false);
+        setSelectedImage(null);
+      }
+    };
+    
+    // Add click event listeners to all images
+    const images = doc.querySelectorAll('img');
+    images.forEach(img => {
+      img.removeEventListener('click', handleImageClick as EventListener);
+      img.addEventListener('click', handleImageClick as EventListener);
+      img.style.cursor = 'pointer'; // Show pointer cursor on images
+    });
+    
+    // Add click event listener to the document to hide controls when clicking elsewhere
+    doc.removeEventListener('click', (e) => {
+      if ((e.target as HTMLElement).tagName !== 'IMG') {
+        setShowImageControls(false);
+        setSelectedImage(null);
+      }
+    });
+    
+    doc.addEventListener('click', (e) => {
+      if ((e.target as HTMLElement).tagName !== 'IMG') {
+        setShowImageControls(false);
+        setSelectedImage(null);
+      }
+    });
+  };
+  
+  // Function to increase image size
+  const increaseImageSize = () => {
+    if (selectedImage) {
+      const currentWidth = selectedImage.width || selectedImage.offsetWidth;
+      const newWidth = Math.min(currentWidth * 1.1, 2000); // Increase by 10%, max 2000px
+      
+      // Update image width
+      selectedImage.style.width = `${newWidth}px`;
+      
+      // Trigger content sync if in direct edit mode
+      if (editMode === 'direct' && iframeRef.current?.contentDocument) {
+        const event = new Event('input', { bubbles: true });
+        const contentElement = iframeRef.current.contentDocument.querySelector('.document-content') || 
+                              iframeRef.current.contentDocument.body;
+        contentElement.dispatchEvent(event);
+      }
+    }
+  };
+  
+  // Function to decrease image size
+  const decreaseImageSize = () => {
+    if (selectedImage) {
+      const currentWidth = selectedImage.width || selectedImage.offsetWidth;
+      const newWidth = Math.max(currentWidth * 0.9, 50); // Decrease by 10%, min 50px
+      
+      // Update image width
+      selectedImage.style.width = `${newWidth}px`;
+      
+      // Trigger content sync if in direct edit mode
+      if (editMode === 'direct' && iframeRef.current?.contentDocument) {
+        const event = new Event('input', { bubbles: true });
+        const contentElement = iframeRef.current.contentDocument.querySelector('.document-content') || 
+                              iframeRef.current.contentDocument.body;
+        contentElement.dispatchEvent(event);
+      }
+    }
+  };
+  
+  // Function to reset image size
+  const resetImageSize = () => {
+    if (selectedImage) {
+      // Remove explicit width/height to restore natural size
+      selectedImage.style.width = '';
+      selectedImage.style.height = '';
+      
+      // Trigger content sync if in direct edit mode
+      if (editMode === 'direct' && iframeRef.current?.contentDocument) {
+        const event = new Event('input', { bubbles: true });
+        const contentElement = iframeRef.current.contentDocument.querySelector('.document-content') || 
+                              iframeRef.current.contentDocument.body;
+        contentElement.dispatchEvent(event);
+      }
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+      {/* Image resize controls - floating toolbar */}
+      {showImageControls && selectedImage && (
+        <div className="fixed z-50 bg-white dark:bg-gray-800 rounded-lg shadow-lg p-2 flex gap-2" 
+             style={{ top: `${imageControlsPosition.top}px`, left: `${imageControlsPosition.left}px` }}>
+          <button
+            onClick={decreaseImageSize}
+            className="p-2 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md"
+            title="Decrease image size"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" className="w-5 h-5">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
+            </svg>
+          </button>
+          
+          <button
+            onClick={resetImageSize}
+            className="p-2 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md"
+            title="Reset to original size"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" className="w-5 h-5">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+          </button>
+          
+          <button
+            onClick={increaseImageSize}
+            className="p-2 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md"
+            title="Increase image size"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" className="w-5 h-5">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v12m6-6H6" />
+            </svg>
+          </button>
+        </div>
+      )}
       <main className="container mx-auto px-4 py-8">
         <div className="text-center mb-8">
           <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-4">

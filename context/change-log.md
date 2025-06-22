@@ -1,5 +1,24 @@
 # PDF Export Implementation - Change Log
 
+## Latest Changes - 2025-06-22
+
+### Image Resize Feature Added
+- Implemented image resize functionality in direct edit mode
+- Added floating toolbar UI for image size controls
+- Created increase (10%), decrease (10%) and reset size functions
+- Integrated with existing content sync mechanism
+- Preserved resize state during HTML updates
+
+Detailed documentation: [Image Resize Feature](./image-resize-feature.md)
+
+### Direct Edit Mode Bug Fix
+- Fixed issue with HTML structure loss during direct edit mode
+- Preserved scroll position when switching to direct edit mode
+- Maintained proper HTML structure during content updates
+- Added proper TypeScript typing for contentEditable elements
+
+Detailed documentation: [Direct Edit Mode Fix](./direct-edit-mode-fix.md)
+
 ## Session Date: 2025-06-22
 
 ### Problem Statement
