@@ -37,14 +37,65 @@ export async function POST(request: NextRequest) {
       );
     });
 
-    // Get content dimensions for single continuous page
-    const bodyHeight = await page.evaluate(() => {
-      return document.body.scrollHeight;
+    // Wait a bit more for complete rendering
+    await page.waitForTimeout(1000);
+
+    // Get accurate content dimensions using multiple methods
+    const contentHeight = await page.evaluate((): Promise<number> => {
+      // Force full layout recalculation
+      document.body.style.height = 'auto';
+      document.body.style.overflow = 'visible';
+      
+      // Wait for layout
+      return new Promise((resolve) => {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            // Get all possible height measurements
+            const measurements = [
+              document.body.scrollHeight,
+              document.body.offsetHeight,
+              document.body.clientHeight,
+              document.documentElement.scrollHeight,
+              document.documentElement.offsetHeight,
+              document.documentElement.clientHeight
+            ];
+            
+            // Get bounding rectangle of body
+            const bodyRect = document.body.getBoundingClientRect();
+            measurements.push(bodyRect.height);
+            
+            // Find all elements and get the maximum bottom position
+            const allElements = document.body.querySelectorAll('*');
+            let maxBottom = 0;
+            
+            allElements.forEach(el => {
+              const rect = el.getBoundingClientRect();
+              const bottom = rect.bottom;
+              if (bottom > maxBottom) {
+                maxBottom = bottom;
+              }
+            });
+            
+            measurements.push(maxBottom);
+            
+            // Return the maximum of all measurements
+            const finalHeight = Math.max(...measurements.filter(h => h > 0));
+            console.log('Height measurements:', measurements, 'Final:', finalHeight);
+            resolve(finalHeight);
+          });
+        });
+      });
     });
 
-    // Calculate page dimensions (A4 width, dynamic height)
+    console.log(`Final content height: ${contentHeight}px`);
+
+    // Calculate page height with very generous padding
     const pageWidth = 210; // A4 width in mm
-    const pageHeight = Math.max(297, Math.ceil(bodyHeight * 0.26458)); // Convert px to mm, minimum A4 height
+    // Use more generous conversion: 1px ≈ 0.3mm + much larger padding
+    const heightInMm = Math.ceil(contentHeight * 0.3) + 100; // Add 100mm very generous padding
+    const pageHeight = Math.max(297, heightInMm); // Minimum A4 height
+
+    console.log(`Final page height: ${pageHeight}mm (from ${contentHeight}px)`);
 
     // Generate PDF with selectable text as single continuous page
     const pdfBuffer = await page.pdf({
