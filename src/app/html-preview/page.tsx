@@ -243,7 +243,7 @@ export default function HtmlPreview() {
     return contentToSend;
   };
 
-  // Function to export HTML preview to PDF using server-side conversion
+  // Function to export HTML preview to PDF using server-side Puppeteer approach
   const exportToPdf = async () => {
     if (!htmlCode.trim()) {
       showToast('Please enter some HTML content before exporting', 'error');
@@ -259,88 +259,95 @@ export default function HtmlPreview() {
       setIsExporting(true);
       showToast('Generating PDF...', 'info');
       
-      // Initialize html2pdf.js for proper HTML rendering
-      const html2pdf = (await import('html2pdf.js')).default;
-      
-      // Get content from iframe
+      // Get content from iframe for server-side generation
       if (!iframeRef.current?.contentDocument) {
         throw new Error('Cannot access iframe content');
       }
       
       const iframeDoc = iframeRef.current.contentDocument;
-      const element = iframeDoc.body;
       
-      // Calculate dynamic height for single continuous page
-      const contentHeight = element.scrollHeight;
-      const width = 210; // A4 width in mm
-      
-      const options = {
-        filename: `HTML-Preview-${Date.now()}.pdf`,
-        image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: {
-          scale: 2,
-          useCORS: true,
-          allowTaint: true,
-          foreignObjectRendering: false,
-          letterRendering: true,
-          logging: true,
-          imageTimeout: 45000,
-          async onclone(clonedDoc: Document) {
-            // Process images through proxy
-            const images = clonedDoc.querySelectorAll('img');
-            console.log(`Processing ${images.length} images for PDF`);
-            
-            const imagePromises = Array.from(images).map(async (img, index) => {
-              const originalSrc = img.getAttribute('src');
-              if (!originalSrc || originalSrc.startsWith('data:')) return;
-              
-              try {
-                let proxyUrl = '';
-                if (originalSrc.startsWith('http') || originalSrc.startsWith('//')) {
-                  const isGitbookUrl = originalSrc.includes('gitbook') || originalSrc.includes('~gitbook');
-                  if (isGitbookUrl) {
-                    proxyUrl = `/api/image-proxy?url=${encodeURIComponent(encodeURIComponent(originalSrc))}&gitbook=true&t=${Date.now()}`;
-                  } else {
-                    proxyUrl = `/api/image-proxy?url=${encodeURIComponent(originalSrc)}&t=${Date.now()}`;
-                  }
-                  
-                  const response = await fetch(proxyUrl);
-                  if (response.ok) {
-                    const blob = await response.blob();
-                    const dataURL = await new Promise<string>((resolve) => {
-                      const reader = new FileReader();
-                      reader.onload = () => resolve(reader.result as string);
-                      reader.readAsDataURL(blob);
-                    });
-                    img.setAttribute('src', dataURL);
-                    img.setAttribute('crossorigin', 'anonymous');
-                  }
-                }
-              } catch (error) {
-                console.error(`Failed to load image ${index + 1}:`, error);
-              }
-            });
-            
-            await Promise.all(imagePromises);
+      // Get complete HTML with styles
+      const styles = Array.from(iframeDoc.styleSheets)
+        .map(sheet => {
+          try {
+            return Array.from(sheet.cssRules)
+              .map(rule => rule.cssText)
+              .join('\n');
+          } catch (e) {
+            return '';
           }
-        },
-        jsPDF: {
-          unit: 'mm',
-          format: [width, Math.ceil(contentHeight / 2.65)],
-          orientation: 'portrait',
-          compress: true,
-          hotfixes: ['px_scaling'],
-          putOnlyUsedFonts: true,
-          margins: { top: 5, right: 5, bottom: 5, left: 5 },
-          textColor: '#000000',
-          outputPdf: 'dataurlstring'
-        },
-        pagebreak: { mode: 'avoid-all' },
-        enableLinks: true,
-      };
+        })
+        .join('\n');
       
-      const pdf = await html2pdf().set(options).from(element).toPdf().get('pdf');
-      const blob = pdf.output('blob');
+      // Process images to use data URLs
+      const clonedDoc = iframeDoc.cloneNode(true) as Document;
+      const images = clonedDoc.querySelectorAll('img');
+      
+      // Convert images to data URLs for server-side access
+      const imagePromises = Array.from(images).map(async (img) => {
+        const originalSrc = img.getAttribute('src');
+        if (originalSrc && (originalSrc.startsWith('http') || originalSrc.startsWith('//'))) {
+          try {
+            const isGitbookUrl = originalSrc.includes('gitbook') || originalSrc.includes('~gitbook');
+            let proxyUrl = '';
+            if (isGitbookUrl) {
+              proxyUrl = `/api/image-proxy?url=${encodeURIComponent(encodeURIComponent(originalSrc))}&gitbook=true&t=${Date.now()}`;
+            } else {
+              proxyUrl = `/api/image-proxy?url=${encodeURIComponent(originalSrc)}&t=${Date.now()}`;
+            }
+            
+            const response = await fetch(proxyUrl);
+            if (response.ok) {
+              const blob = await response.blob();
+              const dataURL = await new Promise<string>((resolve) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result as string);
+                reader.readAsDataURL(blob);
+              });
+              img.src = dataURL;
+            }
+          } catch (error) {
+            console.error('Failed to load image:', error);
+            // Keep original src as fallback
+          }
+        }
+      });
+      
+      // Wait for all images to be processed
+      await Promise.all(imagePromises);
+      
+      // Create complete HTML document
+      const htmlContent = `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <meta charset="utf-8">
+            <style>
+              ${styles}
+              body { margin: 0; padding: 20px; }
+            </style>
+          </head>
+          <body>
+            ${clonedDoc.body.innerHTML}
+          </body>
+        </html>
+      `;
+      
+      // Send to server-side PDF generation
+      const response = await fetch('/api/generate-pdf', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ htmlContent }),
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to generate PDF');
+      }
+      
+      // Get PDF blob and show in popup
+      const blob = await response.blob();
       const url = URL.createObjectURL(blob);
       
       // Open PDF in new window as popup
@@ -359,7 +366,7 @@ export default function HtmlPreview() {
         
         // Clean up URL after delay
         setTimeout(() => URL.revokeObjectURL(url), 60000);
-        showToast('PDF generated successfully!', 'success');
+        showToast('PDF generated successfully with selectable text!', 'success');
       } else {
         showToast('Please allow popups to view the PDF', 'info');
       }
