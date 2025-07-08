@@ -94,10 +94,14 @@ export default function HtmlPreview() {
     }, 3000);
   };
 
-  // Function to handle image upload
-  const handleImageUpload = async (file: File) => {
-    if (!file || !/^image\//.test(file.type)) {
-      showToast('Please upload a valid image file', 'error');
+  // Function to handle file upload
+  const handleFileUpload = async (file: File) => {
+    const isPdf = file.type === 'application/pdf';
+    const isDocx = file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    const isImage = /^image\//.test(file.type);
+    
+    if (!file || !(isImage || isPdf || isDocx)) {
+      showToast('Please upload a valid image, PDF or DOCX file', 'error');
       return;
     }
     
@@ -117,28 +121,54 @@ export default function HtmlPreview() {
         reader.readAsDataURL(file);
       });
       
-      const imgTag = `<img src="${dataUrl}" alt="${file.name}" style="max-width: 100%; height: auto;" />`;
+      // Handle different file types
+      const isPdf = file.type === 'application/pdf';
+      const isDocx = file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+      const isImage = /^image\//.test(file.type);
+      
+      let contentTag = '';
+      
+      if (isImage) {
+        contentTag = `<img src="${dataUrl}" alt="${file.name}" style="max-width: 100%; height: auto;" />`;
+      } else if (isPdf) {
+        contentTag = `
+          <div class="pdf-embed" style="width: 100%; margin: 20px 0;">
+            <p style="font-weight: bold; margin-bottom: 5px;">${file.name}</p>
+            <object data="${dataUrl}" type="application/pdf" width="100%" height="500px">
+              <p>Your browser does not support PDF embedding. <a href="${dataUrl}" download="${file.name}">Click here to download</a></p>
+            </object>
+          </div>
+        `;
+      } else if (isDocx) {
+        // For DOCX, we can only provide a download link as browsers can't render DOCX natively
+        contentTag = `
+          <div class="docx-link" style="padding: 15px; border: 1px solid #e0e0e0; border-radius: 5px; margin: 20px 0;">
+            <p style="font-weight: bold; margin-bottom: 5px;">📄 ${file.name}</p>
+            <p>DOCX file attached - <a href="${dataUrl}" download="${file.name}">Click here to download</a></p>
+          </div>
+        `;
+      }
       
       if (editMode === 'direct' && iframeRef.current?.contentDocument) {
         const selection = iframeRef.current.contentDocument.getSelection();
         if (selection && selection.rangeCount > 0) {
           const range = selection.getRangeAt(0);
-          const imgElement = iframeRef.current.contentDocument.createElement('div');
-          imgElement.innerHTML = imgTag;
-          range.insertNode(imgElement.firstChild!);
+          const contentElement = iframeRef.current.contentDocument.createElement('div');
+          contentElement.innerHTML = contentTag;
+          range.insertNode(contentElement.firstChild!);
           
           const updatedHtml = iframeRef.current.contentDocument.body.innerHTML;
           setHtmlCode(updatedHtml);
         }
       } else {
-        setHtmlCode((prevHtml) => prevHtml + imgTag);
+        setHtmlCode((prevHtml) => prevHtml + contentTag);
       }
       
       setImageUploadProgress(null);
-      showToast('Image uploaded successfully!', 'success');
+      showToast('File uploaded successfully!', 'success');
     } catch (error) {
-      console.error('Error uploading image:', error);
-      showToast('Failed to upload image. Please try again.', 'error');
+      console.error('Error uploading file:', error);
+      showToast('Failed to upload file. Please try again.', 'error');
       setImageUploadProgress(null);
     }
   };
@@ -262,10 +292,14 @@ export default function HtmlPreview() {
     
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       const file = e.dataTransfer.files[0];
-      if (file.type.startsWith('image/')) {
-        handleImageUpload(file);
+      const isPdf = file.type === 'application/pdf';
+      const isDocx = file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+      const isImage = file.type.startsWith('image/');
+      
+      if (isImage || isPdf || isDocx) {
+        handleFileUpload(file);
       } else {
-        showToast('Please drop an image file', 'error');
+        showToast('Please drop an image, PDF, or DOCX file', 'error');
       }
     }
   };
@@ -653,7 +687,7 @@ export default function HtmlPreview() {
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      handleImageUpload(file);
+      handleFileUpload(file);
     }
   };
 
@@ -824,16 +858,16 @@ export default function HtmlPreview() {
               <div className="flex gap-2 flex-wrap">
                 <input
                   type="file"
-                  accept="image/*"
+                  accept="image/*,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                   onChange={handleFileInputChange}
                   className="hidden"
-                  id="image-upload"
+                  id="file-upload"
                 />
                 <label
-                  htmlFor="image-upload"
+                  htmlFor="file-upload"
                   className="px-3 py-1 text-sm bg-green-600 hover:bg-green-700 text-white rounded-md transition-colors cursor-pointer"
                 >
-                  Upload Image
+                  Upload File
                 </label>
                 <button
                   onClick={exportTurboDocx}

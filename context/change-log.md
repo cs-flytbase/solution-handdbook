@@ -2,6 +2,15 @@
 
 ## Latest Changes - 2025-06-22
 
+### PDF and DOCX Support Added
+- Enhanced file upload functionality to support PDF and DOCX files
+- Added proper embedding of PDF files using the object tag
+- Created styled download links for DOCX files
+- Updated drag-and-drop handling for all supported file types
+- Maintained compatibility with direct edit mode
+
+Detailed documentation: [File Upload Enhancement](./file-upload-enhancement.md)
+
 ### Image Resize Feature Added
 - Implemented image resize functionality in direct edit mode
 - Added floating toolbar UI for image size controls
